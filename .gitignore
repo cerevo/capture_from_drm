@@ -1,0 +1,3 @@
+*.o
+*.d
+capture_drm_sample

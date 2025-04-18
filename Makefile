@@ -1,6 +1,6 @@
 CC=g++
 
-OBJS = main.o capture_drm.o conv_yuv2rgb_gpu.o
+OBJS = main.o capture_drm.o
 TARGET = capture_drm_sample
 
 LIBS = -lm -lpthread

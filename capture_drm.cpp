@@ -66,11 +66,10 @@ uint8_t convert_yu12_to_rgba8888( uint8_t* rgba8888, uint8_t* yuvSpace, uint32_t
 
     uint32_t rgb_ptr = 0;
 
-#pragma omp parallel for
-    for ( int row = 0; row < height; row++ ) {
-        int y_row = row * width;
-        int uv_row = ( row / 2 ) * ( width / 2 );
-        for ( int col = 0; col < width; col++ ) {
+    for ( uint32_t row = 0; row < height; row++ ) {
+        uint32_t y_row = row * width;
+        uint32_t uv_row = ( row / 2 ) * ( width / 2 );
+        for ( uint32_t col = 0; col < width; col++ ) {
             uint8_t* y = ySpace + y_row + col;
             uint8_t* u = uSpace + uv_row + ( col >> 1 );
             uint8_t* v = vSpace + uv_row + ( col >> 1 );
@@ -98,11 +97,9 @@ int dump_plane_yuv( uint32_t fd, drmModePlane * ovr, drm_capture_ctx_t* ctx )
     char sBuffer[256];
     uint32_t imgsize;
     //unsigned int ylen, uvlen;
-    uint32_t ylenp, ulenp, vlenp;
-    uint8_t *pFb_p0=NULL;
+    uint8_t *pFb_p0 = NULL;
     int iBpp = 0;
     int ret = 0;
-    bool bPacked = false;
 
     fb2 = drmModeGetFB2(fd, ovr->fb_id);
     if(!fb2) {
@@ -117,7 +114,6 @@ int dump_plane_yuv( uint32_t fd, drmModePlane * ovr, drm_capture_ctx_t* ctx )
         case DRM_FORMAT_YUV420:
             // "YU12": 2x2 subsampled chroma. Y -> U -> V planar. 
             iBpp = 12;
-            bPacked = false;
             break;
         default:
             printf("Unsupported format detected: '%s'\n", sBuffer);
@@ -169,7 +165,6 @@ int dump_plane_yuv( uint32_t fd, drmModePlane * ovr, drm_capture_ctx_t* ctx )
     sprintf(sBuffer, "%s/P%d_%dx%d-%d_FB%d.yuv", ".", ovr->plane_id, fb2->width, fb2->height, iBpp, ovr->fb_id);
     printf("-> Output: %s (%d)\n", sBuffer, imgsize);
     dump_buf_file(pFb_p0, imgsize, sBuffer);
-    doDump = false;
 
     // convert YUV to RGBA8888
     if ( ctx->rgbaImageBuffer ) {
@@ -235,67 +230,51 @@ int close_drm_device( drm_capture_ctx_t* ctx )
 
 int capture_rgb_image( drm_capture_ctx_t* ctx )
 {
-    int rt = 0;
-    int ct = 0;
+    int ret = 0;
     drmModeResPtr res;
     drmModePlaneResPtr planeRes;
     drmModePlanePtr plane;
 
     int drmFd = open("/dev/dri/card0", O_RDWR);
-    if ( ctx->fd < 0 ) {
+    if ( drmFd < 0 ) {
         printf("Failed to open DRM device, error: %s\n", strerror(errno));
         return -1;
     }
 
-    drmSetClientCap(drmFd, DRM_CLIENT_CAP_UNIVERSAL_PLANES, 1);
-    res = drmModeGetResources(drmFd);
+    ctx->fd = drmFd; // Assign the opened file descriptor to ctx->fd
+    drmSetClientCap(ctx->fd, DRM_CLIENT_CAP_UNIVERSAL_PLANES, 1);
+    res = drmModeGetResources(ctx->fd);
     if (res == 0) {
-        printf("Failed to get the resources!\n");
-        rt = -2;
-        goto Err;
+        fprintf(stderr, "Failed to get DRM resources, error: %s\n", strerror(errno));
+        return -1;
     }
 
-    planeRes = drmModeGetPlaneResources(drmFd);
-    if (!planeRes) {
-        printf("Failed to get the plane resources!\n");
-        rt = -2;
-        goto Err;
+    planeRes = drmModeGetPlaneResources(ctx->fd);
+    if (!planeRes ) {
+        fprintf( stderr, "Failed to get plane resources, error: %s\n", strerror(errno));
+        return -1;
     }
 
     if ( planeRes->count_planes > MAX_PLANE ) {
-        printf("Too many planes(%d), cap to %d\n", planeRes->count_planes, MAX_PLANE);
         planeRes->count_planes = MAX_PLANE;
     }
 
-    ct = 0;
     plane = NULL;
-    for ( int i = 0; i < planeRes->count_planes; i++) {
-        plane = drmModeGetPlane(drmFd, planeRes->planes[i]);
+    for ( uint32_t i = 0; i < planeRes->count_planes; i++) {
+        plane = drmModeGetPlane(ctx->fd, planeRes->planes[i]);
         if (!plane) {
             continue;
         }
 
         if ( plane->fb_id > 0 ) {
+            fprintf(stderr, "Found a valid plane with fb_id: %d\n", plane->fb_id);
             break;
         }
     }
-
-    printf("Dump plane buffer to mem ...\n");
-        
-    if ( dump_plane_yuv( drmFd, plane, ctx ) ) {
-        printf("Error found! terminating...");
-    } else {
-        // printf("Dumped the plane buffer to mem.\n");
-    }
-
-    goto OK;
-
-Err:
-    if (rt == -1 || rt == -2) {
-        printf("Try another device through '-d' or refer to the full help message through '-h'\n");
-    }
-
-OK:
+    
+    // ctx->rgbImageBufferにRGBA8888のフォーマットでキャプチャ画像が格納される.
+    dump_plane_yuv( ctx->fd, plane, ctx );
+ 
     if ( plane ) {
         drmModeFreePlane(plane);
     }
@@ -308,9 +287,9 @@ OK:
         drmModeFreeResources(res);
     }
 
-    if ( drmFd >= 0 ) {
-        close( drmFd );
+    if (  ctx->fd >= 0 ) {
+        close(ctx->fd);
     }
 
-    return rt;
+    return ret;
 }
