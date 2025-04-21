@@ -100,10 +100,11 @@ int dump_plane_yuv( uint32_t fd, drmModePlane * ovr, drm_capture_ctx_t* ctx )
     uint8_t *pFb_p0 = NULL;
     int iBpp = 0;
     int ret = 0;
+    bool bYUV = false;
 
     fb2 = drmModeGetFB2(fd, ovr->fb_id);
     if(!fb2) {
-        printf("Failed to get FB from DRM, error: %s\n", strerror(errno));
+        printf("Failed to get FB from DRM, fb_id = %d, error: %s\n", ovr->fb_id, strerror(errno));
         return errno;
     }
 
@@ -112,15 +113,20 @@ int dump_plane_yuv( uint32_t fd, drmModePlane * ovr, drm_capture_ctx_t* ctx )
     sBuffer[4]='\0'; /* terminate */
     switch(fb2->pixel_format) {
         case DRM_FORMAT_YUV420:
+            bYUV = true;
             // "YU12": 2x2 subsampled chroma. Y -> U -> V planar. 
             iBpp = 12;
+            imgsize = fb2->pitches[0] * fb2->height + fb2->pitches[1] * fb2->height / 2 + fb2->pitches[2] * fb2->height / 2;
+            break;
+        case DRM_FORMAT_XRGB8888:
+            // "XR24": 8 bits each of X, R, G, B. 32 bits per pixel.
+            iBpp = 32;
+            imgsize = fb2->pitches[0] * fb2->height + fb2->pitches[1] * fb2->height + fb2->pitches[2] * fb2->height;
             break;
         default:
             printf("Unsupported format detected: '%s'\n", sBuffer);
             return 1;
     }
-
-    imgsize = fb2->pitches[0] * fb2->height + fb2->pitches[1] * fb2->height / 2 + fb2->pitches[2] * fb2->height / 2;
 
     uint64_t value;
     ret = drmGetCap(fd, DRM_CAP_PRIME, &value);
@@ -162,12 +168,12 @@ int dump_plane_yuv( uint32_t fd, drmModePlane * ovr, drm_capture_ctx_t* ctx )
         perror( "mmap failed" );
     }
     
-    sprintf(sBuffer, "%s/P%d_%dx%d-%d_FB%d.yuv", ".", ovr->plane_id, fb2->width, fb2->height, iBpp, ovr->fb_id);
+    sprintf(sBuffer, "%s/P%d_%dx%d-%d_FB%d.raw", ".", ovr->plane_id, fb2->width, fb2->height, iBpp, ovr->fb_id);
     printf("-> Output: %s (%d)\n", sBuffer, imgsize);
     dump_buf_file(pFb_p0, imgsize, sBuffer);
 
     // convert YUV to RGBA8888
-    if ( ctx->rgbaImageBuffer ) {
+    if ( ctx->rgbaImageBuffer && bYUV ) {
         convert_yu12_to_rgba8888( ctx->rgbaImageBuffer, pFb_p0, fb2->width, fb2->height );
         sprintf(sBuffer, "%s/P%d_%dx%d-%d_FB%d.rgb", ".", ovr->plane_id, fb2->width, fb2->height, iBpp, ovr->fb_id);
         printf("-> Output: %s (%d)\n", sBuffer, imgsize);
@@ -205,6 +211,15 @@ drm_capture_ctx_t* open_drm_device( uint32_t width, uint32_t height )
     ctx->height = height;
     ctx->rgbaImageBuffer = alloc_rgb_image( width, height );
 
+    // VideoCoreVI以上を搭載するRaspberry Pi 4Bでのテストを想定している.
+    // VideoCoreIV以下の場合は、/dev/dri/card0を指定する.
+    ctx->fd = open("/dev/dri/card1", O_RDWR);
+    if ( ctx->fd < 0 ) {
+        printf("Failed to open DRM device, error: %s\n", strerror(errno));
+        delete ctx;
+        return nullptr;
+    }
+
     return ctx;
 }
 
@@ -235,13 +250,6 @@ int capture_rgb_image( drm_capture_ctx_t* ctx )
     drmModePlaneResPtr planeRes;
     drmModePlanePtr plane;
 
-    int drmFd = open("/dev/dri/card0", O_RDWR);
-    if ( drmFd < 0 ) {
-        printf("Failed to open DRM device, error: %s\n", strerror(errno));
-        return -1;
-    }
-
-    ctx->fd = drmFd; // Assign the opened file descriptor to ctx->fd
     drmSetClientCap(ctx->fd, DRM_CLIENT_CAP_UNIVERSAL_PLANES, 1);
     res = drmModeGetResources(ctx->fd);
     if (res == 0) {
@@ -267,9 +275,17 @@ int capture_rgb_image( drm_capture_ctx_t* ctx )
         }
 
         if ( plane->fb_id > 0 ) {
-            fprintf(stderr, "Found a valid plane with fb_id: %d\n", plane->fb_id);
+            printf("Plane ID: %d, FB ID: %d, Format: ", plane->plane_id, plane->fb_id);
             break;
         }
+    }
+
+    if ( plane->fb_id == 0 ) {
+        fprintf(stderr, "No valid plane found.\n");
+        drmModeFreePlane(plane);
+        drmModeFreePlaneResources(planeRes);
+        drmModeFreeResources(res);
+        return -1;
     }
     
     // ctx->rgbImageBufferにRGBA8888のフォーマットでキャプチャ画像が格納される.
@@ -285,10 +301,6 @@ int capture_rgb_image( drm_capture_ctx_t* ctx )
     
     if ( res ) {
         drmModeFreeResources(res);
-    }
-
-    if (  ctx->fd >= 0 ) {
-        close(ctx->fd);
     }
 
     return ret;
