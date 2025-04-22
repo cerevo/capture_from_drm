@@ -3,7 +3,7 @@ CC=g++
 OBJS = main.o capture_drm.o
 TARGET = capture_drm_sample
 
-LIBS = -lm -lpthread
+LIBS = -lm
 LIBS += `pkg-config --cflags --libs libdrm`
 CFLAGS = -I/usr/include
 CPPFLAGS = -std=c++11 -Wall -g -O0
