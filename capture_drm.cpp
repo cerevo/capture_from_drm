@@ -25,20 +25,6 @@ extern "C" {
 #include "capture_drm.h"
 
 
-void fourcc_decode(unsigned int code, char *name) 
-{
-    char a, b, c, d;
-    if(!code || !name)
-        return;
-
-    a = (char)(code & 0xFF);
-    b = (char)(code >> 8 & 0xFF);
-    c = (char)(code >> 16 & 0xFF);
-    d = (char)(code >> 24 & 0xFF);
-    sprintf(name, "%c%c%c%c", a,b,c,d);
-}
-
-
 void dump_buf_file(uint8_t *fb_addr, int len, char *fname)
 {
     FILE *fp;
@@ -96,7 +82,6 @@ int dump_plane_yuv( uint32_t fd, drmModePlane * ovr, drm_capture_ctx_t* ctx )
 
     char sBuffer[256];
     uint32_t imgsize;
-    //unsigned int ylen, uvlen;
     uint8_t *pFb_p0 = NULL;
     int iBpp = 0;
     int ret = 0;
@@ -109,8 +94,6 @@ int dump_plane_yuv( uint32_t fd, drmModePlane * ovr, drm_capture_ctx_t* ctx )
     }
 
     // Detect the format
-    fourcc_decode(fb2->pixel_format, sBuffer);
-    sBuffer[4]='\0'; /* terminate */
     switch(fb2->pixel_format) {
         case DRM_FORMAT_YUV420:
             bYUV = true;
@@ -124,7 +107,6 @@ int dump_plane_yuv( uint32_t fd, drmModePlane * ovr, drm_capture_ctx_t* ctx )
             imgsize = fb2->pitches[0] * fb2->height + fb2->pitches[1] * fb2->height + fb2->pitches[2] * fb2->height;
             break;
         default:
-            printf("Unsupported format detected: '%s'\n", sBuffer);
             return 1;
     }
 
