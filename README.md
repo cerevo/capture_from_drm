@@ -11,7 +11,8 @@ libdrmを用いた画面キャプチャの例です。\
 - make
 - pkg-config
 - libdrm-dev
-  - `sudo apt install make pkg-config libdrm-dev`
+  - `sudo apt install g++ make pkg-config libdrm-dev`
 
 ## build＆実行
-`make && ./capture_drm_sample`
+`make && sudo ./capture_drm_sample`
+  - 実行ユーザを`video`グループへ追加すると`sudo`なしで実行可能
